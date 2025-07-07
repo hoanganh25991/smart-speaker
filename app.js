@@ -250,7 +250,8 @@ class RealtimeGPTChat {
                 break;
                 
             case 'conversation.item.input_audio_transcription.completed':
-                this.updateStatusText(`"${data.transcript}"`);
+                // Transcription completed but we don't display it
+                console.log('Transcription:', data.transcript);
                 break;
                 
             case 'response.done':
