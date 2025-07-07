@@ -1,0 +1,25 @@
+{
+  "_comment": "This configuration file is now deprecated. All configuration values are loaded from environment variables (.env file).",
+  "_note": "This file is kept for reference. The application now uses environment variables from .env file.",
+  "openai": {
+    "apiKey": "${OPENAI_API_KEY}",
+    "baseUrl": "${OPENAI_BASE_URL}",
+    "model": "${OPENAI_MODEL}",
+    "voice": "${OPENAI_VOICE}",
+    "language": "${OPENAI_LANGUAGE}"
+  },
+  "server": {
+    "port": "${SERVER_PORT}",
+    "host": "${SERVER_HOST}"
+  },
+  "realtime": {
+    "url": "${REALTIME_URL}",
+    "instructions": "${REALTIME_INSTRUCTIONS}",
+    "turn_detection": {
+      "type": "${TURN_DETECTION_TYPE}",
+      "threshold": "${TURN_DETECTION_THRESHOLD}",
+      "prefix_padding_ms": "${TURN_DETECTION_PREFIX_PADDING_MS}",
+      "silence_duration_ms": "${TURN_DETECTION_SILENCE_DURATION_MS}"
+    }
+  }
+}

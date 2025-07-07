@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Realtime GPT Connection</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .status { padding: 10px; margin: 10px 0; border-radius: 5px; }
+        .success { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .error { background: #f8d7da; color: #721c24; border: 1px solid #f1aeb5; }
+        button { padding: 10px 20px; margin: 5px; cursor: pointer; }
+    </style>
+</head>
+<body>
+    <h1>Realtime GPT Chat - Connection Test</h1>
+    
+    <div id="status" class="status">Ready to test connection...</div>
+    
+    <button onclick="testConnection()">Test Server Connection</button>
+    <button onclick="testWebSocket()">Test WebSocket Connection</button>
+    <button onclick="openApp()">Open Full Application</button>
+    
+    <div id="log" style="margin-top: 20px; font-family: monospace; white-space: pre-wrap;"></div>
+
+    <script>
+        function log(message) {
+            const timestamp = new Date().toLocaleTimeString();
+            document.getElementById('log').textContent += `[${timestamp}] ${message}\n`;
+        }
+
+        async function testConnection() {
+            const statusDiv = document.getElementById('status');
+            
+            try {
+                log('Testing server connection...');
+                const response = await fetch('/health');
+                const data = await response.json();
+                
+                if (response.ok) {
+                    statusDiv.className = 'status success';
+                    statusDiv.textContent = `✅ Server is running! Status: ${data.status}, Clients: ${data.clients}`;
+                    log('Server connection successful: ' + JSON.stringify(data));
+                } else {
+                    throw new Error('Server returned error status');
+                }
+            } catch (error) {
+                statusDiv.className = 'status error';
+                statusDiv.textContent = `❌ Server connection failed: ${error.message}`;
+                log('Server connection failed: ' + error.message);
+            }
+        }
+
+        async function testWebSocket() {
+            log('Testing WebSocket connection...');
+            
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}`;
+            
+            const ws = new WebSocket(wsUrl);
+            
+            ws.onopen = () => {
+                log('WebSocket connected successfully');
+                ws.send(JSON.stringify({ type: 'connect' }));
+            };
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                log('WebSocket message received: ' + JSON.stringify(data));
+                
+                if (data.type === 'connected') {
+                    log('✅ Successfully connected to OpenAI Realtime API!');
+                    // Test a simple text message
+                    setTimeout(() => {
+                        ws.send(JSON.stringify({
+                            type: 'text',
+                            text: 'Hello, this is a test message. Please respond briefly.'
+                        }));
+                        log('Sent test message to GPT');
+                    }, 1000);
+                }
+            };
+            
+            ws.onerror = (error) => {
+                log('WebSocket error: ' + error);
+            };
+            
+            ws.onclose = () => {
+                log('WebSocket connection closed');
+            };
+            
+            // Close connection after 10 seconds
+            setTimeout(() => {
+                if (ws.readyState === WebSocket.OPEN) {
+                    ws.close();
+                    log('Test completed - WebSocket closed');
+                }
+            }, 10000);
+        }
+
+        function openApp() {
+            window.open('/', '_blank');
+        }
+
+        // Auto-test on load
+        window.onload = () => {
+            testConnection();
+        };
+    </script>
+</body>
+</html>
