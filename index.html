@@ -33,21 +33,7 @@
             position: relative;
         }
 
-        .wake-instruction {
-            position: absolute;
-            top: 20%;
-            font-size: 18px;
-            font-weight: 300;
-            color: #a0aec0;
-            text-align: center;
-            opacity: 0.8;
-            animation: breathe 3s ease-in-out infinite;
-        }
 
-        @keyframes breathe {
-            0%, 100% { opacity: 0.5; transform: scale(0.98); }
-            50% { opacity: 1; transform: scale(1); }
-        }
 
         .echo-device {
             position: relative;
@@ -240,18 +226,13 @@
                 font-size: 36px;
             }
             
-            .wake-instruction {
-                font-size: 16px;
-                top: 15%;
-            }
+
         }
     </style>
 </head>
 <body>
     <div class="echo-container">
-        <div class="wake-instruction" id="wakeInstruction">
-            Say "Hi GPT" to wake up
-        </div>
+
         
         <div class="echo-device idle" id="echoDevice">
             <div class="echo-center">

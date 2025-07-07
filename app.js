@@ -21,8 +21,7 @@ class RealtimeGPTChat {
             echoDevice: document.getElementById('echoDevice'),
             statusIndicator: document.getElementById('statusIndicator'),
             statusText: document.getElementById('statusText'),
-            audioVisualizer: document.getElementById('audioVisualizer'),
-            wakeInstruction: document.getElementById('wakeInstruction')
+            audioVisualizer: document.getElementById('audioVisualizer')
         };
     }
 
@@ -223,7 +222,7 @@ class RealtimeGPTChat {
         switch (data.type) {
             case 'connected':
                 this.updateConnectionStatus(true);
-                this.updateStatusText('Connected - Say "Hi GPT" to start');
+                this.updateStatusText('Connected - Ready to chat');
                 // Tự động bắt đầu recording liên tục
                 this.startContinuousRecording();
                 break;
@@ -376,7 +375,7 @@ class RealtimeGPTChat {
         this.isRecording = true;
         this.elements.echoDevice.classList.add('idle');
         this.elements.echoDevice.classList.remove('listening', 'speaking');
-        this.updateStatusText('Listening - Say "Hi GPT" to start');
+        this.updateStatusText('Listening...');
     }
 
     stopContinuousRecording() {
@@ -392,11 +391,9 @@ class RealtimeGPTChat {
         
         if (connected) {
             this.elements.statusIndicator.classList.add('connected');
-            this.elements.wakeInstruction.style.display = 'none';
-            this.updateStatusText('Connected - Say "Hi GPT" to start');
+            this.updateStatusText('Connected - Ready to chat');
         } else {
             this.elements.statusIndicator.classList.remove('connected');
-            this.elements.wakeInstruction.style.display = 'block';
             this.updateStatusText('Tap to connect');
             this.elements.echoDevice.classList.remove('listening', 'speaking');
             this.elements.echoDevice.classList.add('idle');
