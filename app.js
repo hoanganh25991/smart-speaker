@@ -8,6 +8,8 @@ class RealtimeGPTChat {
         this.isConnected = false;
         this.audioQueue = [];
         this.currentAudio = null;
+        this.lastMessageTime = 0;
+        this.isWaitingForResponse = false;
         
         this.initializeElements();
         this.setupEventListeners();
@@ -141,6 +143,11 @@ class RealtimeGPTChat {
 
     processRawAudioData(inputData) {
         try {
+            // Skip audio processing if waiting for response (prevent audio echo)
+            if (this.isWaitingForResponse) {
+                return;
+            }
+            
             // Convert Float32Array to PCM16
             const pcm16 = this.convertFloatToPCM16(inputData);
             const base64Audio = btoa(String.fromCharCode.apply(null, pcm16));
@@ -216,6 +223,8 @@ class RealtimeGPTChat {
             console.log('Disconnected from relay server');
             this.updateConnectionStatus(false);
             this.stopContinuousRecording();
+            // Reset waiting flag on disconnect
+            this.isWaitingForResponse = false;
         };
 
         this.ws.onerror = (error) => {
@@ -269,11 +278,15 @@ class RealtimeGPTChat {
                 
             case 'response.done':
                 console.log('Response completed');
+                // Reset waiting flag to allow new requests
+                this.isWaitingForResponse = false;
                 break;
                 
             case 'error':
                 console.error('OpenAI error:', data);
                 this.addMessage('system', `❌ Lỗi: ${data.error?.message || 'Lỗi không xác định'}`);
+                // Reset waiting flag on error
+                this.isWaitingForResponse = false;
                 break;
         }
     }
@@ -362,8 +375,17 @@ class RealtimeGPTChat {
         const text = this.elements.textInput.value.trim();
         if (!text || !this.isConnected) return;
 
+        // Client-side throttling - prevent rapid duplicate messages
+        const currentTime = Date.now();
+        if (this.isWaitingForResponse || (currentTime - this.lastMessageTime < 3000)) {
+            console.log('Preventing duplicate text message - too soon or waiting for response');
+            return;
+        }
+
         this.addMessage('user', text);
         this.elements.textInput.value = '';
+        this.lastMessageTime = currentTime;
+        this.isWaitingForResponse = true;
 
         if (this.ws) {
             this.ws.send(JSON.stringify({
@@ -465,7 +487,4 @@ class RealtimeGPTChat {
     }
 }
 
-// Initialize the application
-document.addEventListener('DOMContentLoaded', () => {
-    new RealtimeGPTChat();
-});
+// Note: Application is initialized from index.html to prevent duplicate instances

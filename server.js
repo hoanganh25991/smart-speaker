@@ -23,10 +23,10 @@ const config = {
     url: process.env.REALTIME_URL,
     instructions: process.env.REALTIME_INSTRUCTIONS,
     turn_detection: {
-      type: process.env.TURN_DETECTION_TYPE,
-      threshold: parseFloat(process.env.TURN_DETECTION_THRESHOLD) || 0.5,
+      type: process.env.TURN_DETECTION_TYPE || 'server_vad',
+      threshold: parseFloat(process.env.TURN_DETECTION_THRESHOLD) || 0.6,
       prefix_padding_ms: parseInt(process.env.TURN_DETECTION_PREFIX_PADDING_MS) || 300,
-      silence_duration_ms: parseInt(process.env.TURN_DETECTION_SILENCE_DURATION_MS) || 200
+      silence_duration_ms: parseInt(process.env.TURN_DETECTION_SILENCE_DURATION_MS) || 800
     }
   }
 };
@@ -75,7 +75,9 @@ wss.on('connection', (ws) => {
     isConnected: false,
     commitTimeout: null,
     audioBufferSize: 0,
-    lastAudioTime: 0
+    lastAudioTime: 0,
+    lastResponseTime: 0,
+    isProcessingResponse: false
   });
 
   ws.on('message', async (message) => {
@@ -116,9 +118,20 @@ wss.on('connection', (ws) => {
             
             // Set new timeout for committing
             client.commitTimeout = setTimeout(() => {
-              if (client.openaiWs && client.isConnected) {
+              if (client.openaiWs && client.isConnected && !client.isProcessingResponse) {
+                const currentTime = Date.now();
+                // Prevent duplicate responses within 3 seconds
+                if (currentTime - client.lastResponseTime < 3000) {
+                  console.log('Preventing duplicate response - too soon after last response');
+                  client.commitTimeout = null;
+                  return;
+                }
+                
                 if (client.audioBufferSize >= minimumBufferSize) {
                   console.log(`Committing audio buffer: ${client.audioBufferSize} bytes (${(client.audioBufferSize / 48000).toFixed(2)}s)`);
+                  
+                  client.isProcessingResponse = true;
+                  client.lastResponseTime = currentTime;
                   
                   client.openaiWs.send(JSON.stringify({
                     type: 'input_audio_buffer.commit'
@@ -151,7 +164,17 @@ wss.on('connection', (ws) => {
           break;
           
         case 'text':
-          if (client.openaiWs && client.isConnected) {
+          if (client.openaiWs && client.isConnected && !client.isProcessingResponse) {
+            const currentTime = Date.now();
+            // Prevent duplicate responses within 3 seconds
+            if (currentTime - client.lastResponseTime < 3000) {
+              console.log('Preventing duplicate text response - too soon after last response');
+              break;
+            }
+            
+            client.isProcessingResponse = true;
+            client.lastResponseTime = currentTime;
+            
             client.openaiWs.send(JSON.stringify({
               type: 'conversation.item.create',
               item: {
@@ -247,8 +270,17 @@ async function connectToOpenAI(clientId, client) {
           case 'response.text.delta':
           case 'response.text.done':
           case 'conversation.item.input_audio_transcription.completed':
+            client.ws.send(JSON.stringify(data));
+            break;
           case 'response.done':
+            // Reset processing flag when response is complete
+            client.isProcessingResponse = false;
+            console.log(`Response completed for client ${clientId}`);
+            client.ws.send(JSON.stringify(data));
+            break;
           case 'error':
+            // Reset processing flag on error
+            client.isProcessingResponse = false;
             client.ws.send(JSON.stringify(data));
             break;
         }
@@ -303,6 +335,8 @@ function disconnectFromOpenAI(clientId, client) {
   // Reset buffer tracking
   client.audioBufferSize = 0;
   client.lastAudioTime = 0;
+  client.lastResponseTime = 0;
+  client.isProcessingResponse = false;
 }
 
 // Health check endpoint
