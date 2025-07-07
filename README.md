@@ -41,4 +41,8 @@ A real-time voice and text chat application using OpenAI's Realtime API with Web
 
 ## License
 
-MIT License - feel free to use and modify as needed.
+Copyright © 2025 Monk Journey Team. All Rights Reserved.
+
+This project is proprietary and confidential. Unauthorized reproduction, distribution, or disclosure is prohibited. No license, express or implied, to any intellectual property rights is granted by this document.
+
+See the [LICENSE](LICENSE) file for full details.
