@@ -18,64 +18,32 @@ class RealtimeGPTChat {
 
     initializeElements() {
         this.elements = {
-            status: document.getElementById('status'),
-            messages: document.getElementById('messages'),
-            textInput: document.getElementById('textInput'),
-            sendBtn: document.getElementById('sendBtn'),
-            connectBtn: document.getElementById('connectBtn'),
-            disconnectBtn: document.getElementById('disconnectBtn'),
-            recordBtn: document.getElementById('recordBtn'),
-            audioLevelBar: document.getElementById('audioLevelBar'),
-            micStatus: document.getElementById('micStatus')
+            echoDevice: document.getElementById('echoDevice'),
+            statusIndicator: document.getElementById('statusIndicator'),
+            statusText: document.getElementById('statusText'),
+            audioVisualizer: document.getElementById('audioVisualizer'),
+            wakeInstruction: document.getElementById('wakeInstruction')
         };
     }
 
     setupEventListeners() {
-        // Text input
-        this.elements.textInput.addEventListener('keypress', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                this.sendTextMessage();
-            }
-        });
-
-        this.elements.sendBtn.addEventListener('click', () => {
-            this.sendTextMessage();
-        });
-
-        // Connection controls
-        this.elements.connectBtn.addEventListener('click', () => {
-            this.connect();
-        });
-
-        this.elements.disconnectBtn.addEventListener('click', () => {
-            this.disconnect();
-        });
-
-        // Audio recording
-        this.elements.recordBtn.addEventListener('mousedown', () => {
-            this.startRecording();
-        });
-
-        this.elements.recordBtn.addEventListener('mouseup', () => {
-            this.stopRecording();
-        });
-
-        this.elements.recordBtn.addEventListener('mouseleave', () => {
-            if (this.isRecording) {
-                this.stopRecording();
+        // Echo device click to connect/disconnect
+        this.elements.echoDevice.addEventListener('click', () => {
+            if (this.isConnected) {
+                this.disconnect();
+            } else {
+                this.connect();
             }
         });
 
         // Touch events for mobile
-        this.elements.recordBtn.addEventListener('touchstart', (e) => {
+        this.elements.echoDevice.addEventListener('touchstart', (e) => {
             e.preventDefault();
-            this.startRecording();
-        });
-
-        this.elements.recordBtn.addEventListener('touchend', (e) => {
-            e.preventDefault();
-            this.stopRecording();
+            if (this.isConnected) {
+                this.disconnect();
+            } else {
+                this.connect();
+            }
         });
     }
 
@@ -117,11 +85,11 @@ class RealtimeGPTChat {
             };
             
             this.startAudioLevelMonitoring();
-            this.addMessage('system', '🎤 Đã cấp quyền truy cập microphone');
+            this.updateStatusText('Microphone ready');
             
         } catch (error) {
             console.error('Error setting up audio:', error);
-            this.addMessage('system', '❌ Không thể truy cập microphone');
+            this.updateStatusText('Microphone access denied');
         }
     }
 
@@ -129,11 +97,21 @@ class RealtimeGPTChat {
         const dataArray = new Uint8Array(this.audioAnalyser.frequencyBinCount);
         
         const updateLevel = () => {
-            if (this.audioAnalyser) {
+            if (this.audioAnalyser && this.isConnected) {
                 this.audioAnalyser.getByteFrequencyData(dataArray);
                 const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
                 const level = (average / 255) * 100;
-                this.elements.audioLevelBar.style.width = `${level}%`;
+                
+                // Update visual effects based on audio level
+                if (level > 10 && this.isRecording) {
+                    this.elements.audioVisualizer.classList.remove('hidden');
+                    this.elements.echoDevice.classList.add('listening');
+                    this.elements.echoDevice.classList.remove('idle', 'speaking');
+                } else if (this.isConnected && !this.isRecording) {
+                    this.elements.audioVisualizer.classList.add('hidden');
+                    this.elements.echoDevice.classList.add('idle');
+                    this.elements.echoDevice.classList.remove('listening', 'speaking');
+                }
             }
             requestAnimationFrame(updateLevel);
         };
@@ -245,14 +223,14 @@ class RealtimeGPTChat {
         switch (data.type) {
             case 'connected':
                 this.updateConnectionStatus(true);
-                this.addMessage('system', '✅ Đã kết nối với OpenAI Realtime API');
+                this.updateStatusText('Connected - Say "Hi GPT" to start');
                 // Tự động bắt đầu recording liên tục
                 this.startContinuousRecording();
                 break;
                 
             case 'disconnected':
                 this.updateConnectionStatus(false);
-                this.addMessage('system', '🔌 Đã ngắt kết nối khỏi OpenAI');
+                this.updateStatusText('Disconnected');
                 this.stopContinuousRecording();
                 break;
                 
@@ -273,18 +251,19 @@ class RealtimeGPTChat {
                 break;
                 
             case 'conversation.item.input_audio_transcription.completed':
-                this.addMessage('user', `🎤 "${data.transcript}"`);
+                this.updateStatusText(`"${data.transcript}"`);
                 break;
                 
             case 'response.done':
                 console.log('Response completed');
                 // Reset waiting flag to allow new requests
                 this.isWaitingForResponse = false;
+                this.updateStatusText('Listening...');
                 break;
                 
             case 'error':
                 console.error('OpenAI error:', data);
-                this.addMessage('system', `❌ Lỗi: ${data.error?.message || 'Lỗi không xác định'}`);
+                this.updateStatusText(`Error: ${data.error?.message || 'Unknown error'}`);
                 // Reset waiting flag on error
                 this.isWaitingForResponse = false;
                 break;
@@ -292,17 +271,8 @@ class RealtimeGPTChat {
     }
 
     handleTextDelta(data) {
-        const messageId = `msg-${data.response_id}-${data.item_id}`;
-        let messageElement = document.getElementById(messageId);
-        
-        if (!messageElement) {
-            messageElement = this.createMessageElement('assistant', '', messageId);
-            this.elements.messages.appendChild(messageElement);
-            this.scrollToBottom();
-        }
-        
-        messageElement.textContent += data.delta;
-        this.scrollToBottom();
+        // Text responses are handled via audio in voice-only mode
+        console.log('Text delta:', data.delta);
     }
 
     handleTextDone(data) {
@@ -313,11 +283,19 @@ class RealtimeGPTChat {
         if (data.delta) {
             this.audioQueue.push(data.delta);
             this.playNextAudio();
+            // Show speaking state
+            this.elements.echoDevice.classList.add('speaking');
+            this.elements.echoDevice.classList.remove('listening', 'idle');
+            this.updateStatusText('Speaking...');
         }
     }
 
     handleAudioDone(data) {
         console.log('Audio response completed');
+        // Return to listening state
+        this.elements.echoDevice.classList.add('idle');
+        this.elements.echoDevice.classList.remove('speaking', 'listening');
+        this.updateStatusText('Listening...');
     }
 
     async playNextAudio() {
@@ -371,52 +349,24 @@ class RealtimeGPTChat {
         return audioBuffer;
     }
 
-    sendTextMessage() {
-        const text = this.elements.textInput.value.trim();
-        if (!text || !this.isConnected) return;
-
-        // Client-side throttling - prevent rapid duplicate messages
-        const currentTime = Date.now();
-        if (this.isWaitingForResponse || (currentTime - this.lastMessageTime < 3000)) {
-            console.log('Preventing duplicate text message - too soon or waiting for response');
-            return;
-        }
-
-        this.addMessage('user', text);
-        this.elements.textInput.value = '';
-        this.lastMessageTime = currentTime;
-        this.isWaitingForResponse = true;
-
-        if (this.ws) {
-            this.ws.send(JSON.stringify({
-                type: 'text',
-                text: text
-            }));
-        }
-    }
+    // Text messaging removed - voice only interface
 
     startRecording() {
         if (!this.audioProcessor || !this.isConnected || this.isRecording) return;
 
         this.isRecording = true;
-        this.elements.recordBtn.classList.remove('idle');
-        this.elements.recordBtn.classList.add('recording');
-        this.elements.recordBtn.textContent = '🔴';
-
-        // AudioProcessor sẽ tự động xử lý audio khi isRecording = true
-        this.addMessage('system', '🎤 Đang thu âm...');
+        this.elements.echoDevice.classList.add('listening');
+        this.elements.echoDevice.classList.remove('idle', 'speaking');
+        this.updateStatusText('Recording...');
     }
 
     stopRecording() {
         if (!this.isRecording) return;
 
         this.isRecording = false;
-        this.elements.recordBtn.classList.remove('recording');
-        this.elements.recordBtn.classList.add('idle');
-        this.elements.recordBtn.textContent = '🎤';
-
-        // AudioProcessor sẽ tự động dừng xử lý audio khi isRecording = false
-        this.addMessage('system', '⏹️ Đã dừng thu âm, đang xử lý...');
+        this.elements.echoDevice.classList.add('idle');
+        this.elements.echoDevice.classList.remove('listening', 'speaking');
+        this.updateStatusText('Processing...');
     }
 
     // Recording liên tục khi connected
@@ -424,66 +374,46 @@ class RealtimeGPTChat {
         if (!this.audioProcessor || !this.isConnected) return;
 
         this.isRecording = true;
-        this.elements.recordBtn.classList.remove('idle');
-        this.elements.recordBtn.classList.add('recording');
-        this.elements.recordBtn.textContent = '🔴';
-        this.elements.micStatus.textContent = '🎤 MIC ON - Nói chuyện tự do!';
-
-        // AudioProcessor sẽ tự động xử lý audio khi isRecording = true
-        this.addMessage('system', '🎤 MIC BẬT - Nói chuyện tự do!');
+        this.elements.echoDevice.classList.add('idle');
+        this.elements.echoDevice.classList.remove('listening', 'speaking');
+        this.updateStatusText('Listening - Say "Hi GPT" to start');
     }
 
     stopContinuousRecording() {
         if (!this.isRecording) return;
 
         this.isRecording = false;
-        this.elements.recordBtn.classList.remove('recording');
-        this.elements.recordBtn.classList.add('idle');
-        this.elements.recordBtn.textContent = '🎤';
-        this.elements.micStatus.textContent = '🎤 MIC TẮT - Đã ngắt kết nối';
-
-        // AudioProcessor sẽ tự động dừng xử lý audio khi isRecording = false
-        this.addMessage('system', '🎤 MIC TẮT');
+        this.elements.echoDevice.classList.remove('listening', 'speaking', 'idle');
+        this.updateStatusText('Disconnected');
     }
 
     updateConnectionStatus(connected) {
         this.isConnected = connected;
         
         if (connected) {
-            this.elements.status.textContent = 'Đã kết nối';
-            this.elements.status.className = 'status connected';
-            this.elements.connectBtn.disabled = true;
-            this.elements.disconnectBtn.disabled = false;
-            this.elements.textInput.disabled = false;
-            this.elements.sendBtn.disabled = false;
-            this.elements.recordBtn.disabled = false;
+            this.elements.statusIndicator.classList.add('connected');
+            this.elements.wakeInstruction.style.display = 'none';
+            this.updateStatusText('Connected - Say "Hi GPT" to start');
         } else {
-            this.elements.status.textContent = 'Chưa kết nối';
-            this.elements.status.className = 'status disconnected';
-            this.elements.connectBtn.disabled = false;
-            this.elements.disconnectBtn.disabled = true;
-            this.elements.textInput.disabled = true;
-            this.elements.sendBtn.disabled = true;
-            this.elements.recordBtn.disabled = true;
+            this.elements.statusIndicator.classList.remove('connected');
+            this.elements.wakeInstruction.style.display = 'block';
+            this.updateStatusText('Tap to connect');
+            this.elements.echoDevice.classList.remove('listening', 'speaking');
+            this.elements.echoDevice.classList.add('idle');
         }
     }
 
-    createMessageElement(type, content, id = null) {
-        const messageDiv = document.createElement('div');
-        messageDiv.className = `message ${type}`;
-        if (id) messageDiv.id = id;
-        messageDiv.textContent = content;
-        return messageDiv;
-    }
-
-    addMessage(type, content) {
-        const messageElement = this.createMessageElement(type, content);
-        this.elements.messages.appendChild(messageElement);
-        this.scrollToBottom();
-    }
-
-    scrollToBottom() {
-        this.elements.messages.scrollTop = this.elements.messages.scrollHeight;
+    updateStatusText(text) {
+        this.elements.statusText.textContent = text;
+        
+        // Update text color based on state
+        if (text.includes('Listening') || text.includes('Recording')) {
+            this.elements.statusText.className = 'status-text listening';
+        } else if (text.includes('Speaking')) {
+            this.elements.statusText.className = 'status-text speaking';
+        } else {
+            this.elements.statusText.className = 'status-text';
+        }
     }
 }
 
