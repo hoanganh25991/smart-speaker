@@ -95,7 +95,7 @@ wss.on('connection', (ws) => {
           break;
           
         case 'audio':
-          if (client.openaiWs && client.isConnected) {
+          if (client.openaiWs && client.isConnected && data.audio && data.audio.length > 0) {
             client.openaiWs.send(JSON.stringify({
               type: 'input_audio_buffer.append',
               audio: data.audio
@@ -106,9 +106,9 @@ wss.on('connection', (ws) => {
             client.audioBufferSize += audioBytes;
             client.lastAudioTime = Date.now();
             
-            // Auto-commit after collecting enough audio (at least 5 seconds)
+            // Auto-commit after collecting enough audio (reduced to 1 second minimum)
             // PCM16 at 24kHz, 1 channel = 48000 bytes per second
-            const minimumBufferSize = 48000 * 5; // 5 seconds of audio
+            const minimumBufferSize = 48000 * 1; // 1 second of audio minimum
             
             // Clear existing timeout if we have new audio
             if (client.commitTimeout) {
@@ -120,8 +120,8 @@ wss.on('connection', (ws) => {
             client.commitTimeout = setTimeout(() => {
               if (client.openaiWs && client.isConnected && !client.isProcessingResponse) {
                 const currentTime = Date.now();
-                // Prevent duplicate responses within 3 seconds
-                if (currentTime - client.lastResponseTime < 3000) {
+                // Prevent duplicate responses within 2 seconds
+                if (currentTime - client.lastResponseTime < 2000) {
                   console.log('Preventing duplicate response - too soon after last response');
                   client.commitTimeout = null;
                   return;
@@ -148,18 +148,13 @@ wss.on('connection', (ws) => {
                   // Reset buffer tracking
                   client.audioBufferSize = 0;
                 } else {
-                  console.log(`Audio buffer too small: ${client.audioBufferSize} bytes (${(client.audioBufferSize / 48000).toFixed(2)}s) - discarding buffer`);
-                  // Clear the buffer if it's too small
-                  if (client.openaiWs && client.isConnected) {
-                    client.openaiWs.send(JSON.stringify({
-                      type: 'input_audio_buffer.clear'
-                    }));
-                  }
-                  client.audioBufferSize = 0;
+                  console.log(`Audio buffer too small: ${client.audioBufferSize} bytes (${(client.audioBufferSize / 48000).toFixed(2)}s) - keeping buffer and waiting for more audio`);
+                  // Don't clear the buffer if it's too small, just wait for more audio
+                  client.audioBufferSize = 0; // Reset tracking but don't clear the actual buffer
                 }
               }
               client.commitTimeout = null;
-            }, 2000); // Wait 2 seconds after last audio chunk
+            }, 1500); // Wait 1.5 seconds after last audio chunk
           }
           break;
           
@@ -214,6 +209,7 @@ wss.on('connection', (ws) => {
             // Reset processing flags
             client.isProcessingResponse = false;
             client.audioBufferSize = 0;
+            client.lastResponseTime = 0; // Reset to allow immediate new response
             
             // Clear any pending commit timeout
             if (client.commitTimeout) {
@@ -225,6 +221,13 @@ wss.on('connection', (ws) => {
             ws.send(JSON.stringify({
               type: 'response_interrupted'
             }));
+            
+            // Give a small delay then start listening for new audio
+            setTimeout(() => {
+              if (client.openaiWs && client.isConnected) {
+                console.log('Ready for new audio input after interruption');
+              }
+            }, 100);
           }
           break;
       }

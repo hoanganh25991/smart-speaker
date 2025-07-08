@@ -8,6 +8,7 @@ class RealtimeGPTChat {
         this.isConnected = false;
         this.audioQueue = [];
         this.currentAudio = null;
+        this.currentGain = null;
         this.lastMessageTime = 0;
         this.isWaitingForResponse = false;
         
@@ -159,11 +160,26 @@ class RealtimeGPTChat {
         this.isInterrupted = true;
         this.lastInterruptionTime = Date.now();
         
-        // Stop current audio playback
+        // Stop current audio playback immediately
         this.stopCurrentAudio();
         
         // Clear audio queue
         this.audioQueue = [];
+        
+        // Stop any ongoing Web Audio API playback
+        if (this.audioContext) {
+            try {
+                // Stop all AudioBufferSourceNodes
+                this.audioContext.suspend();
+                setTimeout(() => {
+                    if (this.audioContext.state === 'suspended') {
+                        this.audioContext.resume();
+                    }
+                }, 100);
+            } catch (error) {
+                console.warn('Error suspending audio context:', error);
+            }
+        }
         
         // Send interruption signal to server
         if (this.ws && this.isConnected) {
@@ -174,6 +190,7 @@ class RealtimeGPTChat {
         
         // Update UI state
         this.isSpeaking = false;
+        this.isWaitingForResponse = false;
         this.elements.echoDevice.classList.remove('speaking');
         this.elements.echoDevice.classList.add('listening');
         this.updateStatusText('Interrupted - Listening...');
@@ -193,12 +210,35 @@ class RealtimeGPTChat {
     stopCurrentAudio() {
         if (this.currentAudio) {
             try {
-                this.currentAudio.stop();
-                this.currentAudio = null;
+                // Immediately fade out the audio for smoother interruption
+                if (this.currentGain) {
+                    this.currentGain.gain.exponentialRampToValueAtTime(0.01, this.audioContext.currentTime + 0.05);
+                }
+                
+                // Stop the audio source after the fade
+                setTimeout(() => {
+                    if (this.currentAudio) {
+                        this.currentAudio.stop();
+                        this.currentAudio.disconnect();
+                        this.currentAudio = null;
+                    }
+                    if (this.currentGain) {
+                        this.currentGain.disconnect();
+                        this.currentGain = null;
+                    }
+                }, 50);
+                
             } catch (error) {
                 console.log('Audio already stopped or completed');
             }
         }
+        
+        // Clear any pending audio in the queue
+        this.audioQueue = [];
+        
+        // Reset audio-related flags
+        this.isSpeaking = false;
+        this.isWaitingForResponse = false;
     }
 
     processRawAudioData(inputData) {
@@ -213,11 +253,17 @@ class RealtimeGPTChat {
                 return;
             }
             
+            // Check if we have meaningful audio data
+            const hasAudio = this.hasSignificantAudio(inputData);
+            if (!hasAudio) {
+                return;
+            }
+            
             // Convert Float32Array to PCM16
             const pcm16 = this.convertFloatToPCM16(inputData);
             const base64Audio = btoa(String.fromCharCode.apply(null, pcm16));
             
-            if (this.ws && this.isConnected) {
+            if (this.ws && this.isConnected && base64Audio.length > 0) {
                 this.ws.send(JSON.stringify({
                     type: 'audio',
                     audio: base64Audio
@@ -226,6 +272,16 @@ class RealtimeGPTChat {
         } catch (error) {
             console.error('Error processing audio:', error);
         }
+    }
+    
+    hasSignificantAudio(inputData) {
+        // Check if the audio has meaningful content (not just silence)
+        let sum = 0;
+        for (let i = 0; i < inputData.length; i++) {
+            sum += Math.abs(inputData[i]);
+        }
+        const average = sum / inputData.length;
+        return average > 0.001; // Threshold for meaningful audio
     }
 
     convertFloatToPCM16(float32Array) {
@@ -352,9 +408,15 @@ class RealtimeGPTChat {
                 
             case 'response_interrupted':
                 console.log('Response interrupted by server');
+                // Stop any playing audio immediately
+                this.stopCurrentAudio();
                 // Reset all states
                 this.isWaitingForResponse = false;
                 this.isSpeaking = false;
+                this.isInterrupted = false;
+                this.audioQueue = [];
+                this.elements.echoDevice.classList.remove('speaking');
+                this.elements.echoDevice.classList.add('listening');
                 this.updateStatusText('Listening...');
                 break;
                 
@@ -416,18 +478,26 @@ class RealtimeGPTChat {
             
             const source = this.audioContext.createBufferSource();
             source.buffer = audioBuffer;
-            source.connect(this.audioContext.destination);
+            
+            // Create a gain node for volume control and immediate stopping
+            const gainNode = this.audioContext.createGain();
+            source.connect(gainNode);
+            gainNode.connect(this.audioContext.destination);
             
             this.currentAudio = source;
+            this.currentGain = gainNode;
             
             source.onended = () => {
                 this.currentAudio = null;
-                if (!this.isInterrupted) {
+                this.currentGain = null;
+                if (!this.isInterrupted && this.audioQueue.length > 0) {
                     this.playNextAudio();
-                } else {
-                    // If interrupted, clear remaining queue
-                    this.audioQueue = [];
+                } else if (this.audioQueue.length === 0) {
+                    // All audio finished
                     this.isSpeaking = false;
+                    this.elements.echoDevice.classList.remove('speaking');
+                    this.elements.echoDevice.classList.add('idle');
+                    this.updateStatusText('Listening...');
                 }
             };
             
@@ -436,7 +506,10 @@ class RealtimeGPTChat {
         } catch (error) {
             console.error('Error playing audio:', error);
             this.currentAudio = null;
-            this.playNextAudio();
+            this.currentGain = null;
+            if (!this.isInterrupted) {
+                this.playNextAudio();
+            }
         }
     }
 
