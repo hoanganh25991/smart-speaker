@@ -54,7 +54,7 @@
     <meta name="format-detection" content="telephone=no">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="application-name" content="AI Voice Assistant">
-    
+
     <!-- External CSS -->
     <link rel="stylesheet" href="css/style.css">
 </head>
@@ -93,18 +93,17 @@
 
         // Register service worker for PWA
         if ('serviceWorker' in navigator) {
-            if (window.location.hostname == "localhost") {
-                return;
+            if (!window.location.hostname == "localhost") {
+                window.addEventListener('load', () => {
+                    navigator.serviceWorker.register('sw.js')
+                        .then((registration) => {
+                            console.log('SW registered: ', registration);
+                        })
+                        .catch((registrationError) => {
+                            console.log('SW registration failed: ', registrationError);
+                        });
+                });
             }
-            window.addEventListener('load', () => {
-                navigator.serviceWorker.register('sw.js')
-                    .then((registration) => {
-                        console.log('SW registered: ', registration);
-                    })
-                    .catch((registrationError) => {
-                        console.log('SW registration failed: ', registrationError);
-                    });
-            });
         }
     </script>
 </body>
