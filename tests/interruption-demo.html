@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Voice Interruption Demo</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        
+        .demo-container {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        h1 {
+            color: #2d3748;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .feature-section {
+            margin-bottom: 30px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #4299e1;
+        }
+        
+        .feature-title {
+            color: #2d3748;
+            font-size: 1.2em;
+            font-weight: bold;
+            margin-bottom: 10px;
+        }
+        
+        .command-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .command-item {
+            background: white;
+            padding: 15px;
+            border-radius: 6px;
+            border: 1px solid #e2e8f0;
+            text-align: center;
+        }
+        
+        .command-text {
+            font-weight: bold;
+            color: #2b6cb0;
+            margin-bottom: 5px;
+        }
+        
+        .command-desc {
+            font-size: 0.9em;
+            color: #666;
+        }
+        
+        .demo-steps {
+            counter-reset: step-counter;
+        }
+        
+        .demo-step {
+            counter-increment: step-counter;
+            margin-bottom: 15px;
+            padding: 15px;
+            background: #e6fffa;
+            border-radius: 6px;
+            border-left: 4px solid #38b2ac;
+        }
+        
+        .demo-step::before {
+            content: "Bước " counter(step-counter) ": ";
+            font-weight: bold;
+            color: #2c7a7b;
+        }
+        
+        .settings-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+        }
+        
+        .settings-table th,
+        .settings-table td {
+            padding: 10px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }
+        
+        .settings-table th {
+            background-color: #f7fafc;
+            font-weight: bold;
+        }
+        
+        .note {
+            background: #fff3cd;
+            border: 1px solid #ffeaa7;
+            padding: 15px;
+            border-radius: 6px;
+            margin-top: 20px;
+        }
+        
+        .note-title {
+            font-weight: bold;
+            color: #856404;
+            margin-bottom: 10px;
+        }
+    </style>
+</head>
+<body>
+    <div class="demo-container">
+        <h1>🎤 Voice Interruption Demo</h1>
+        
+        <div class="feature-section">
+            <div class="feature-title">✨ Tính năng ngắt lời thông minh</div>
+            <p>Hệ thống AI Voice Assistant hiện đã hỗ trợ tính năng ngắt lời tự nhiên, cho phép bạn dừng phản hồi của AI bằng giọng nói để đặt câu hỏi mới.</p>
+        </div>
+        
+        <div class="feature-section">
+            <div class="feature-title">🗣️ Các lệnh ngắt lời tiếng Việt</div>
+            <div class="command-list">
+                <div class="command-item">
+                    <div class="command-text">"dừng lại"</div>
+                    <div class="command-desc">Lệnh dừng chính</div>
+                </div>
+                <div class="command-item">
+                    <div class="command-text">"chờ đã"</div>
+                    <div class="command-desc">Tạm dừng phản hồi</div>
+                </div>
+                <div class="command-item">
+                    <div class="command-text">"ngừng"</div>
+                    <div class="command-desc">Dừng ngay lập tức</div>
+                </div>
+                <div class="command-item">
+                    <div class="command-text">"tạm dừng"</div>
+                    <div class="command-desc">Tạm dừng tạm thời</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="feature-section">
+            <div class="feature-title">📋 Cách sử dụng</div>
+            <div class="demo-steps">
+                <div class="demo-step">
+                    Kết nối với AI Voice Assistant bằng cách nhấp vào biểu tượng robot
+                </div>
+                <div class="demo-step">
+                    Đặt câu hỏi và chờ AI bắt đầu trả lời
+                </div>
+                <div class="demo-step">
+                    Khi AI đang nói, bạn có thể nói "dừng lại" hoặc bất kỳ lệnh nào khác
+                </div>
+                <div class="demo-step">
+                    AI sẽ dừng ngay lập tức và chuyển sang chế độ lắng nghe
+                </div>
+                <div class="demo-step">
+                    Đặt câu hỏi mới và tiếp tục cuộc trò chuyện
+                </div>
+            </div>
+        </div>
+        
+        <div class="feature-section">
+            <div class="feature-title">⚙️ Cấu hình hệ thống</div>
+            <table class="settings-table">
+                <thead>
+                    <tr>
+                        <th>Tham số</th>
+                        <th>Giá trị</th>
+                        <th>Mô tả</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>Ngưỡng ngắt lời</td>
+                        <td>60/100</td>
+                        <td>Mức âm thanh cần thiết để kích hoạt ngắt lời</td>
+                    </tr>
+                    <tr>
+                        <td>Ngưỡng tiếng ồn</td>
+                        <td>20/100</td>
+                        <td>Lọc bỏ tiếng ồn nền</td>
+                    </tr>
+                    <tr>
+                        <td>Thời gian chờ</td>
+                        <td>300ms</td>
+                        <td>Thời gian xác nhận trước khi ngắt lời</td>
+                    </tr>
+                    <tr>
+                        <td>Thời gian nghỉ</td>
+                        <td>1000ms</td>
+                        <td>Thời gian tối thiểu giữa các lần ngắt lời</td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+        
+        <div class="feature-section">
+            <div class="feature-title">🎯 Trường hợp sử dụng</div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                <div>
+                    <h4 style="color: #38a169;">✅ Sẽ ngắt lời:</h4>
+                    <ul>
+                        <li>Nói to và rõ ràng</li>
+                        <li>Các lệnh tiếng Việt</li>
+                        <li>Giọng nói tự nhiên</li>
+                        <li>Câu hỏi mới</li>
+                    </ul>
+                </div>
+                <div>
+                    <h4 style="color: #e53e3e;">❌ Sẽ không ngắt lời:</h4>
+                    <ul>
+                        <li>Tiếng ồn nền (TV, nhạc)</li>
+                        <li>Nói thầm, thì thầm</li>
+                        <li>Tiếng ho, hắt hơi</li>
+                        <li>Ngắt lời liên tục</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+        
+        <div class="note">
+            <div class="note-title">📝 Ghi chú quan trọng</div>
+            <ul>
+                <li>Đảm bảo microphone đã được cấp quyền truy cập</li>
+                <li>Nói rõ ràng và đủ to để hệ thống nhận diện</li>
+                <li>Tính năng chỉ hoạt động khi AI đang phản hồi</li>
+                <li>Hệ thống sẽ tự động quay lại chế độ lắng nghe sau khi ngắt lời</li>
+            </ul>
+        </div>
+    </div>
+</body>
+</html>

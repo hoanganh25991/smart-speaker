@@ -11,6 +11,16 @@ class RealtimeGPTChat {
         this.lastMessageTime = 0;
         this.isWaitingForResponse = false;
         
+        // Interruption handling
+        this.isSpeaking = false;
+        this.interruptionThreshold = 60; // Audio level threshold (0-100)
+        this.quietThreshold = 20; // Background noise threshold
+        this.interruptionDelay = 300; // Delay before triggering interruption (ms)
+        this.minInterruptionInterval = 1000; // Minimum time between interruptions (ms)
+        this.lastInterruptionTime = 0;
+        this.interruptionTimer = null;
+        this.isInterrupted = false;
+        
         this.initializeElements();
         this.setupEventListeners();
         this.setupAudio();
@@ -101,12 +111,17 @@ class RealtimeGPTChat {
                 const average = dataArray.reduce((a, b) => a + b) / dataArray.length;
                 const level = (average / 255) * 100;
                 
+                // Check for interruption during AI speaking
+                if (this.isSpeaking && level > this.interruptionThreshold) {
+                    this.handleInterruption(level);
+                }
+                
                 // Update visual effects based on audio level
-                if (level > 10 && this.isRecording) {
+                if (level > 10 && this.isRecording && !this.isSpeaking) {
                     this.elements.audioVisualizer.classList.remove('hidden');
                     this.elements.echoDevice.classList.add('listening');
                     this.elements.echoDevice.classList.remove('idle', 'speaking');
-                } else if (this.isConnected && !this.isRecording) {
+                } else if (this.isConnected && !this.isRecording && !this.isSpeaking) {
                     this.elements.audioVisualizer.classList.add('hidden');
                     this.elements.echoDevice.classList.add('idle');
                     this.elements.echoDevice.classList.remove('listening', 'speaking');
@@ -118,10 +133,83 @@ class RealtimeGPTChat {
         updateLevel();
     }
 
+    handleInterruption(level) {
+        const now = Date.now();
+        
+        // Check if we're in cooldown period
+        if (now - this.lastInterruptionTime < this.minInterruptionInterval) {
+            return;
+        }
+        
+        // Clear any existing timer
+        if (this.interruptionTimer) {
+            clearTimeout(this.interruptionTimer);
+        }
+        
+        // Set a timer to confirm interruption after delay
+        this.interruptionTimer = setTimeout(() => {
+            if (this.isSpeaking && !this.isInterrupted) {
+                console.log('Interruption detected - stopping AI response');
+                this.triggerInterruption();
+            }
+        }, this.interruptionDelay);
+    }
+
+    triggerInterruption() {
+        this.isInterrupted = true;
+        this.lastInterruptionTime = Date.now();
+        
+        // Stop current audio playback
+        this.stopCurrentAudio();
+        
+        // Clear audio queue
+        this.audioQueue = [];
+        
+        // Send interruption signal to server
+        if (this.ws && this.isConnected) {
+            this.ws.send(JSON.stringify({
+                type: 'interrupt_response'
+            }));
+        }
+        
+        // Update UI state
+        this.isSpeaking = false;
+        this.elements.echoDevice.classList.remove('speaking');
+        this.elements.echoDevice.classList.add('listening');
+        this.updateStatusText('Interrupted - Listening...');
+        
+        // Clear interruption timer
+        if (this.interruptionTimer) {
+            clearTimeout(this.interruptionTimer);
+            this.interruptionTimer = null;
+        }
+        
+        // Reset interruption flag after a short delay
+        setTimeout(() => {
+            this.isInterrupted = false;
+        }, 500);
+    }
+
+    stopCurrentAudio() {
+        if (this.currentAudio) {
+            try {
+                this.currentAudio.stop();
+                this.currentAudio = null;
+            } catch (error) {
+                console.log('Audio already stopped or completed');
+            }
+        }
+    }
+
     processRawAudioData(inputData) {
         try {
             // Skip audio processing if waiting for response (prevent audio echo)
             if (this.isWaitingForResponse) {
+                return;
+            }
+            
+            // Skip audio processing if AI is speaking and we're not interrupted
+            if (this.isSpeaking && !this.isInterrupted) {
                 return;
             }
             
@@ -258,6 +346,15 @@ class RealtimeGPTChat {
                 console.log('Response completed');
                 // Reset waiting flag to allow new requests
                 this.isWaitingForResponse = false;
+                this.isSpeaking = false;
+                this.updateStatusText('Listening...');
+                break;
+                
+            case 'response_interrupted':
+                console.log('Response interrupted by server');
+                // Reset all states
+                this.isWaitingForResponse = false;
+                this.isSpeaking = false;
                 this.updateStatusText('Listening...');
                 break;
                 
@@ -280,10 +377,11 @@ class RealtimeGPTChat {
     }
 
     handleAudioDelta(data) {
-        if (data.delta) {
+        if (data.delta && !this.isInterrupted) {
             this.audioQueue.push(data.delta);
             this.playNextAudio();
             // Show speaking state
+            this.isSpeaking = true;
             this.elements.echoDevice.classList.add('speaking');
             this.elements.echoDevice.classList.remove('listening', 'idle');
             this.updateStatusText('Speaking...');
@@ -293,13 +391,14 @@ class RealtimeGPTChat {
     handleAudioDone(data) {
         console.log('Audio response completed');
         // Return to listening state
+        this.isSpeaking = false;
         this.elements.echoDevice.classList.add('idle');
         this.elements.echoDevice.classList.remove('speaking', 'listening');
         this.updateStatusText('Listening...');
     }
 
     async playNextAudio() {
-        if (this.currentAudio || this.audioQueue.length === 0) {
+        if (this.currentAudio || this.audioQueue.length === 0 || this.isInterrupted) {
             return;
         }
 
@@ -323,7 +422,13 @@ class RealtimeGPTChat {
             
             source.onended = () => {
                 this.currentAudio = null;
-                this.playNextAudio();
+                if (!this.isInterrupted) {
+                    this.playNextAudio();
+                } else {
+                    // If interrupted, clear remaining queue
+                    this.audioQueue = [];
+                    this.isSpeaking = false;
+                }
             };
             
             source.start();

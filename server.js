@@ -196,6 +196,37 @@ wss.on('connection', (ws) => {
             }));
           }
           break;
+          
+        case 'interrupt_response':
+          if (client.openaiWs && client.isConnected) {
+            console.log('Interrupting current response...');
+            
+            // Cancel current OpenAI response
+            client.openaiWs.send(JSON.stringify({
+              type: 'response.cancel'
+            }));
+            
+            // Clear audio buffer
+            client.openaiWs.send(JSON.stringify({
+              type: 'input_audio_buffer.clear'
+            }));
+            
+            // Reset processing flags
+            client.isProcessingResponse = false;
+            client.audioBufferSize = 0;
+            
+            // Clear any pending commit timeout
+            if (client.commitTimeout) {
+              clearTimeout(client.commitTimeout);
+              client.commitTimeout = null;
+            }
+            
+            // Send confirmation to client
+            ws.send(JSON.stringify({
+              type: 'response_interrupted'
+            }));
+          }
+          break;
       }
     } catch (error) {
       console.error('Error processing message:', error);
