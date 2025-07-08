@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Binary WebSocket</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #1a1a1a;
+            color: #fff;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            font-weight: bold;
+        }
+        .connected { background: #2d5a2d; }
+        .disconnected { background: #5a2d2d; }
+        .testing { background: #5a5a2d; }
+        button {
+            background: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover { background: #45a049; }
+        button:disabled { background: #666; cursor: not-allowed; }
+        .log {
+            background: #333;
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 5px;
+            height: 300px;
+            overflow-y: auto;
+            font-family: monospace;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 Binary WebSocket Test</h1>
+    
+    <div id="status" class="status disconnected">
+        Disconnected
+    </div>
+    
+    <div>
+        <button id="connectBtn">Connect</button>
+        <button id="testBinaryBtn" disabled>Test Binary Audio</button>
+        <button id="testJsonBtn" disabled>Test JSON Message</button>
+        <button id="disconnectBtn" disabled>Disconnect</button>
+    </div>
+    
+    <div class="log" id="log"></div>
+    
+    <script>
+        class BinaryWebSocketTest {
+            constructor() {
+                this.ws = null;
+                this.isConnected = false;
+                this.setupUI();
+            }
+            
+            setupUI() {
+                document.getElementById('connectBtn').addEventListener('click', () => this.connect());
+                document.getElementById('testBinaryBtn').addEventListener('click', () => this.testBinaryMessage());
+                document.getElementById('testJsonBtn').addEventListener('click', () => this.testJsonMessage());
+                document.getElementById('disconnectBtn').addEventListener('click', () => this.disconnect());
+            }
+            
+            log(message) {
+                const logDiv = document.getElementById('log');
+                const time = new Date().toLocaleTimeString();
+                logDiv.innerHTML += `[${time}] ${message}\n`;
+                logDiv.scrollTop = logDiv.scrollHeight;
+            }
+            
+            updateStatus(status, className) {
+                const statusDiv = document.getElementById('status');
+                statusDiv.textContent = status;
+                statusDiv.className = `status ${className}`;
+            }
+            
+            updateButtons(connected) {
+                document.getElementById('connectBtn').disabled = connected;
+                document.getElementById('testBinaryBtn').disabled = !connected;
+                document.getElementById('testJsonBtn').disabled = !connected;
+                document.getElementById('disconnectBtn').disabled = !connected;
+            }
+            
+            connect() {
+                this.log('🔌 Connecting to WebSocket...');
+                
+                // Connect to local server
+                this.ws = new WebSocket('ws://localhost:3000');
+                
+                this.ws.onopen = () => {
+                    this.log('✅ Connected to server');
+                    this.updateStatus('Connected', 'connected');
+                    this.updateButtons(true);
+                    this.isConnected = true;
+                    
+                    // Send connect message
+                    this.ws.send(JSON.stringify({ type: 'connect' }));
+                };
+                
+                this.ws.onmessage = (event) => {
+                    if (event.data instanceof ArrayBuffer) {
+                        const view = new Uint8Array(event.data);
+                        const messageType = view[0];
+                        const dataLength = view.length - 1;
+                        this.log(`📦 Received binary message: type=${messageType}, length=${dataLength} bytes`);
+                        
+                        if (messageType === 0x02) {
+                            this.log('🎵 Received audio response');
+                        }
+                    } else {
+                        const data = JSON.parse(event.data);
+                        this.log(`📨 Received JSON: ${JSON.stringify(data)}`);
+                    }
+                };
+                
+                this.ws.onclose = () => {
+                    this.log('🔌 Disconnected from server');
+                    this.updateStatus('Disconnected', 'disconnected');
+                    this.updateButtons(false);
+                    this.isConnected = false;
+                };
+                
+                this.ws.onerror = (error) => {
+                    this.log(`❌ WebSocket error: ${error}`);
+                    this.updateStatus('Error', 'disconnected');
+                };
+            }
+            
+            testBinaryMessage() {
+                if (!this.isConnected) return;
+                
+                this.log('🧪 Testing binary audio message...');
+                
+                // Create fake PCM16 audio data
+                const audioLength = 1024; // 1KB of audio
+                const pcm16 = new Uint8Array(audioLength);
+                
+                // Fill with sine wave pattern
+                for (let i = 0; i < audioLength; i += 2) {
+                    const sample = Math.sin(2 * Math.PI * i / audioLength) * 0x7FFF;
+                    pcm16[i] = sample & 0xFF;
+                    pcm16[i + 1] = (sample >> 8) & 0xFF;
+                }
+                
+                // Create binary message
+                const audioBuffer = new ArrayBuffer(pcm16.length + 1);
+                const view = new Uint8Array(audioBuffer);
+                view[0] = 0x01; // Binary audio message type
+                view.set(pcm16, 1);
+                
+                this.log(`📤 Sending binary audio: ${pcm16.length} bytes`);
+                this.ws.send(audioBuffer);
+            }
+            
+            testJsonMessage() {
+                if (!this.isConnected) return;
+                
+                this.log('🧪 Testing JSON message...');
+                
+                const message = {
+                    type: 'text',
+                    text: 'Test message for JSON communication'
+                };
+                
+                this.log(`📤 Sending JSON: ${JSON.stringify(message)}`);
+                this.ws.send(JSON.stringify(message));
+            }
+            
+            disconnect() {
+                if (this.ws) {
+                    this.log('🔌 Disconnecting...');
+                    this.ws.send(JSON.stringify({ type: 'disconnect' }));
+                    this.ws.close();
+                }
+            }
+        }
+        
+        // Initialize test
+        document.addEventListener('DOMContentLoaded', () => {
+            new BinaryWebSocketTest();
+        });
+    </script>
+</body>
+</html>

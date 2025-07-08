@@ -10,7 +10,6 @@ class RealtimeGPTChat {
         this.currentAudio = null;
         this.currentGain = null;
         this.lastMessageTime = 0;
-        this.isWaitingForResponse = false;
         
         // Interruption handling
         this.isSpeaking = false;
@@ -95,11 +94,11 @@ class RealtimeGPTChat {
             };
             
             this.startAudioLevelMonitoring();
-            this.updateStatusText('Microphone ready');
+            this.updateStatusText('Micro đã sẵn sàng');
             
         } catch (error) {
             console.error('Error setting up audio:', error);
-            this.updateStatusText('Microphone access denied');
+            this.updateStatusText('Từ chối quyền truy cập micro');
         }
     }
 
@@ -193,7 +192,7 @@ class RealtimeGPTChat {
         this.isWaitingForResponse = false;
         this.elements.echoDevice.classList.remove('speaking');
         this.elements.echoDevice.classList.add('listening');
-        this.updateStatusText('Interrupted - Listening...');
+        this.updateStatusText('Đã ngắt - Đang nghe...');
         
         // Clear interruption timer
         if (this.interruptionTimer) {
@@ -238,16 +237,10 @@ class RealtimeGPTChat {
         
         // Reset audio-related flags
         this.isSpeaking = false;
-        this.isWaitingForResponse = false;
     }
 
     processRawAudioData(inputData) {
         try {
-            // Skip audio processing if waiting for response (prevent audio echo)
-            if (this.isWaitingForResponse) {
-                return;
-            }
-            
             // Skip audio processing if AI is speaking and we're not interrupted
             if (this.isSpeaking && !this.isInterrupted) {
                 return;
@@ -264,10 +257,12 @@ class RealtimeGPTChat {
             const base64Audio = btoa(String.fromCharCode.apply(null, pcm16));
             
             if (this.ws && this.isConnected && base64Audio.length > 0) {
-                this.ws.send(JSON.stringify({
-                    type: 'audio',
-                    audio: base64Audio
-                }));
+                // Send raw PCM data directly as binary to avoid JSON.stringify overhead
+                const audioBuffer = new ArrayBuffer(pcm16.length + 1);
+                const view = new Uint8Array(audioBuffer);
+                view[0] = 0x01; // Binary audio message type
+                view.set(pcm16, 1);
+                this.ws.send(audioBuffer);
             }
         } catch (error) {
             console.error('Error processing audio:', error);
@@ -337,6 +332,27 @@ class RealtimeGPTChat {
         };
 
         this.ws.onmessage = (event) => {
+            // Handle binary audio messages
+            if (event.data instanceof ArrayBuffer) {
+                const view = new Uint8Array(event.data);
+                const messageType = view[0];
+                
+                if (messageType === 0x02) {
+                    // Binary audio response - play immediately
+                    const audioData = event.data.slice(1);
+                    const base64Audio = btoa(String.fromCharCode.apply(null, new Uint8Array(audioData)));
+                    this.playAudioImmediately(base64Audio);
+                    
+                    // Show speaking state
+                    this.isSpeaking = true;
+                    this.elements.echoDevice.classList.add('speaking');
+                    this.elements.echoDevice.classList.remove('listening', 'idle');
+                    this.updateStatusText('Đang nói...');
+                }
+                return;
+            }
+            
+            // Handle JSON messages
             this.handleWebSocketMessage(JSON.parse(event.data));
         };
 
@@ -344,13 +360,11 @@ class RealtimeGPTChat {
             console.log('Disconnected from relay server');
             this.updateConnectionStatus(false);
             this.stopContinuousRecording();
-            // Reset waiting flag on disconnect
-            this.isWaitingForResponse = false;
         };
 
         this.ws.onerror = (error) => {
             console.error('WebSocket error:', error);
-            this.addMessage('system', '❌ Lỗi kết nối');
+            this.updateStatusText('❌ Lỗi kết nối');
         };
     }
 
@@ -366,14 +380,14 @@ class RealtimeGPTChat {
         switch (data.type) {
             case 'connected':
                 this.updateConnectionStatus(true);
-                this.updateStatusText('Connected - Ready to chat');
+                this.updateStatusText('Đã kết nối - Sẵn sàng trò chuyện');
                 // Tự động bắt đầu recording liên tục
                 this.startContinuousRecording();
                 break;
                 
             case 'disconnected':
                 this.updateConnectionStatus(false);
-                this.updateStatusText('Disconnected');
+                this.updateStatusText('Đã ngắt kết nối');
                 this.stopContinuousRecording();
                 break;
                 
@@ -386,7 +400,7 @@ class RealtimeGPTChat {
                 break;
                 
             case 'response.audio.delta':
-                this.handleAudioDelta(data);
+                // Audio deltas are now handled as binary messages for performance
                 break;
                 
             case 'response.audio.done':
@@ -400,10 +414,9 @@ class RealtimeGPTChat {
                 
             case 'response.done':
                 console.log('Response completed');
-                // Reset waiting flag to allow new requests
-                this.isWaitingForResponse = false;
+                // Reset speaking state
                 this.isSpeaking = false;
-                this.updateStatusText('Listening...');
+                this.updateStatusText('Đang nghe...');
                 break;
                 
             case 'response_interrupted':
@@ -411,20 +424,17 @@ class RealtimeGPTChat {
                 // Stop any playing audio immediately
                 this.stopCurrentAudio();
                 // Reset all states
-                this.isWaitingForResponse = false;
                 this.isSpeaking = false;
                 this.isInterrupted = false;
                 this.audioQueue = [];
                 this.elements.echoDevice.classList.remove('speaking');
                 this.elements.echoDevice.classList.add('listening');
-                this.updateStatusText('Listening...');
+                this.updateStatusText('Đang nghe...');
                 break;
                 
             case 'error':
                 console.error('OpenAI error:', data);
-                this.updateStatusText(`Error: ${data.error?.message || 'Unknown error'}`);
-                // Reset waiting flag on error
-                this.isWaitingForResponse = false;
+                this.updateStatusText(`Lỗi: ${data.error?.message || 'Lỗi không xác định'}`);
                 break;
         }
     }
@@ -440,13 +450,13 @@ class RealtimeGPTChat {
 
     handleAudioDelta(data) {
         if (data.delta && !this.isInterrupted) {
-            this.audioQueue.push(data.delta);
-            this.playNextAudio();
+            // Immediate streaming - play audio as soon as it arrives
+            this.playAudioImmediately(data.delta);
             // Show speaking state
             this.isSpeaking = true;
             this.elements.echoDevice.classList.add('speaking');
             this.elements.echoDevice.classList.remove('listening', 'idle');
-            this.updateStatusText('Speaking...');
+            this.updateStatusText('Đang nói...');
         }
     }
 
@@ -456,7 +466,7 @@ class RealtimeGPTChat {
         this.isSpeaking = false;
         this.elements.echoDevice.classList.add('idle');
         this.elements.echoDevice.classList.remove('speaking', 'listening');
-        this.updateStatusText('Listening...');
+        this.updateStatusText('Đang nghe...');
     }
 
     async playNextAudio() {
@@ -497,7 +507,7 @@ class RealtimeGPTChat {
                     this.isSpeaking = false;
                     this.elements.echoDevice.classList.remove('speaking');
                     this.elements.echoDevice.classList.add('idle');
-                    this.updateStatusText('Listening...');
+                    this.updateStatusText('Đang nghe...');
                 }
             };
             
@@ -510,6 +520,56 @@ class RealtimeGPTChat {
             if (!this.isInterrupted) {
                 this.playNextAudio();
             }
+        }
+    }
+
+    async playAudioImmediately(base64Audio) {
+        if (!base64Audio || this.isInterrupted) {
+            return;
+        }
+
+        try {
+            const binaryString = atob(base64Audio);
+            const bytes = new Uint8Array(binaryString.length);
+            
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+            
+            // Convert PCM16 to AudioBuffer
+            const audioBuffer = await this.pcm16ToAudioBuffer(bytes);
+            
+            const source = this.audioContext.createBufferSource();
+            source.buffer = audioBuffer;
+            
+            // Create a gain node for volume control and immediate stopping
+            const gainNode = this.audioContext.createGain();
+            source.connect(gainNode);
+            gainNode.connect(this.audioContext.destination);
+            
+            // Store current audio for potential interruption
+            if (this.currentAudio) {
+                try {
+                    this.currentAudio.stop();
+                } catch (e) {
+                    // Audio may already be stopped
+                }
+            }
+            
+            this.currentAudio = source;
+            this.currentGain = gainNode;
+            
+            source.onended = () => {
+                if (this.currentAudio === source) {
+                    this.currentAudio = null;
+                    this.currentGain = null;
+                }
+            };
+            
+            source.start();
+            
+        } catch (error) {
+            console.error('Error playing audio immediately:', error);
         }
     }
 

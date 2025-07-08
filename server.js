@@ -73,17 +73,52 @@ wss.on('connection', (ws) => {
     ws: ws,
     openaiWs: null,
     isConnected: false,
-    commitTimeout: null,
-    audioBufferSize: 0,
-    lastAudioTime: 0,
     lastResponseTime: 0,
     isProcessingResponse: false
   });
 
   ws.on('message', async (message) => {
     try {
-      const data = JSON.parse(message.toString());
       const client = clients.get(clientId);
+      
+      // Handle binary audio messages for maximum performance
+      if (message instanceof Buffer && message.length > 0) {
+        const messageType = message[0];
+        
+        if (messageType === 0x01 && client.openaiWs && client.isConnected) {
+          // Binary audio message - extract PCM data
+          const pcmData = message.slice(1);
+          const base64Audio = pcmData.toString('base64');
+          
+          // Direct streaming - send audio immediately
+          client.openaiWs.send(JSON.stringify({
+            type: 'input_audio_buffer.append',
+            audio: base64Audio
+          }));
+          
+          // Immediate commit and response
+          client.openaiWs.send(JSON.stringify({
+            type: 'input_audio_buffer.commit'
+          }));
+          
+          if (!client.isProcessingResponse) {
+            client.isProcessingResponse = true;
+            client.lastResponseTime = Date.now();
+            
+            client.openaiWs.send(JSON.stringify({
+              type: 'response.create',
+              response: {
+                modalities: ['text', 'audio'],
+                instructions: config.realtime.instructions
+              }
+            }));
+          }
+        }
+        return;
+      }
+      
+      // Handle JSON messages for control
+      const data = JSON.parse(message.toString());
       
       switch (data.type) {
         case 'connect':
@@ -96,79 +131,37 @@ wss.on('connection', (ws) => {
           
         case 'audio':
           if (client.openaiWs && client.isConnected && data.audio && data.audio.length > 0) {
+            // Direct streaming - send audio immediately without buffering
             client.openaiWs.send(JSON.stringify({
               type: 'input_audio_buffer.append',
               audio: data.audio
             }));
             
-            // Estimate audio buffer size (base64 length * 0.75 for PCM16 at 24kHz)
-            const audioBytes = data.audio.length * 0.75;
-            client.audioBufferSize += audioBytes;
-            client.lastAudioTime = Date.now();
+            // Immediate commit for real-time response
+            client.openaiWs.send(JSON.stringify({
+              type: 'input_audio_buffer.commit'
+            }));
             
-            // Auto-commit after collecting enough audio (reduced to 1 second minimum)
-            // PCM16 at 24kHz, 1 channel = 48000 bytes per second
-            const minimumBufferSize = 48000 * 1; // 1 second of audio minimum
-            
-            // Clear existing timeout if we have new audio
-            if (client.commitTimeout) {
-              clearTimeout(client.commitTimeout);
-              client.commitTimeout = null;
+            // Trigger response immediately
+            if (!client.isProcessingResponse) {
+              client.isProcessingResponse = true;
+              client.lastResponseTime = Date.now();
+              
+              client.openaiWs.send(JSON.stringify({
+                type: 'response.create',
+                response: {
+                  modalities: ['text', 'audio'],
+                  instructions: config.realtime.instructions
+                }
+              }));
             }
-            
-            // Set new timeout for committing
-            client.commitTimeout = setTimeout(() => {
-              if (client.openaiWs && client.isConnected && !client.isProcessingResponse) {
-                const currentTime = Date.now();
-                // Prevent duplicate responses within 2 seconds
-                if (currentTime - client.lastResponseTime < 2000) {
-                  console.log('Preventing duplicate response - too soon after last response');
-                  client.commitTimeout = null;
-                  return;
-                }
-                
-                if (client.audioBufferSize >= minimumBufferSize) {
-                  console.log(`Committing audio buffer: ${client.audioBufferSize} bytes (${(client.audioBufferSize / 48000).toFixed(2)}s)`);
-                  
-                  client.isProcessingResponse = true;
-                  client.lastResponseTime = currentTime;
-                  
-                  client.openaiWs.send(JSON.stringify({
-                    type: 'input_audio_buffer.commit'
-                  }));
-                  
-                  client.openaiWs.send(JSON.stringify({
-                    type: 'response.create',
-                    response: {
-                      modalities: ['text', 'audio'],
-                      instructions: config.realtime.instructions
-                    }
-                  }));
-                  
-                  // Reset buffer tracking
-                  client.audioBufferSize = 0;
-                } else {
-                  console.log(`Audio buffer too small: ${client.audioBufferSize} bytes (${(client.audioBufferSize / 48000).toFixed(2)}s) - keeping buffer and waiting for more audio`);
-                  // Don't clear the buffer if it's too small, just wait for more audio
-                  client.audioBufferSize = 0; // Reset tracking but don't clear the actual buffer
-                }
-              }
-              client.commitTimeout = null;
-            }, 1500); // Wait 1.5 seconds after last audio chunk
           }
           break;
           
         case 'text':
           if (client.openaiWs && client.isConnected && !client.isProcessingResponse) {
-            const currentTime = Date.now();
-            // Prevent duplicate responses within 3 seconds
-            if (currentTime - client.lastResponseTime < 3000) {
-              console.log('Preventing duplicate text response - too soon after last response');
-              break;
-            }
-            
             client.isProcessingResponse = true;
-            client.lastResponseTime = currentTime;
+            client.lastResponseTime = Date.now();
             
             client.openaiWs.send(JSON.stringify({
               type: 'conversation.item.create',
@@ -206,28 +199,14 @@ wss.on('connection', (ws) => {
               type: 'input_audio_buffer.clear'
             }));
             
-            // Reset processing flags
+            // Reset processing flags immediately
             client.isProcessingResponse = false;
-            client.audioBufferSize = 0;
             client.lastResponseTime = 0; // Reset to allow immediate new response
-            
-            // Clear any pending commit timeout
-            if (client.commitTimeout) {
-              clearTimeout(client.commitTimeout);
-              client.commitTimeout = null;
-            }
             
             // Send confirmation to client
             ws.send(JSON.stringify({
               type: 'response_interrupted'
             }));
-            
-            // Give a small delay then start listening for new audio
-            setTimeout(() => {
-              if (client.openaiWs && client.isConnected) {
-                console.log('Ready for new audio input after interruption');
-              }
-            }, 100);
           }
           break;
       }
@@ -300,6 +279,15 @@ async function connectToOpenAI(clientId, client) {
         // Forward relevant messages to client
         switch (data.type) {
           case 'response.audio.delta':
+            // Send audio delta as binary for maximum performance
+            if (data.delta) {
+              const audioData = Buffer.from(data.delta, 'base64');
+              const binaryMessage = Buffer.alloc(audioData.length + 1);
+              binaryMessage[0] = 0x02; // Binary audio response type
+              audioData.copy(binaryMessage, 1);
+              client.ws.send(binaryMessage);
+            }
+            break;
           case 'response.audio.done':
           case 'response.text.delta':
           case 'response.text.done':
@@ -360,15 +348,7 @@ function disconnectFromOpenAI(clientId, client) {
     console.log(`Disconnected from OpenAI for client: ${clientId}`);
   }
   
-  // Clear any pending timeout
-  if (client.commitTimeout) {
-    clearTimeout(client.commitTimeout);
-    client.commitTimeout = null;
-  }
-  
-  // Reset buffer tracking
-  client.audioBufferSize = 0;
-  client.lastAudioTime = 0;
+  // Reset flags
   client.lastResponseTime = 0;
   client.isProcessingResponse = false;
 }
